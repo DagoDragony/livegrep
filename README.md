@@ -9,7 +9,7 @@ can see a running instance at
 Building
 --------
 
-livegrep builds using [bazel][bazel]. You will need to 
+livegrep builds using [bazel][bazel]. You will need to
 [install][bazel-install] with a version matching that in `.bazelversion`.
 Running bazel via [bazelisk][bazelisk] will download the right version
 automatically.
@@ -28,6 +28,56 @@ dependencies. These will be cached once downloaded.
 [bazel-install]: http://www.bazel.io/docs/install.html
 [bazelisk]: https://bazel.build/install/bazelisk
 
+### macOS build requirements
+
+**A full `Xcode.app` install is required -- Command Line Tools alone are not
+enough**, even though `clang`/`xcodebuild` appear to work for other purposes.
+`rules_go`/`grpc` transitively pull in `apple_support`'s Apple crosstool for
+any macOS build, and that crosstool resolves the toolchain via Bazel's
+`xcode-locator`, which queries macOS Launch Services for a registered
+`com.apple.dt.Xcode` bundle. With CLT only, this lookup fails unconditionally
+(`kLSApplicationNotFoundErr`) no matter what `--action_env`/
+`--xcode_version_config` overrides you pass -- there is no working flag-only
+workaround, including registering a fake `Xcode.app` bundle with
+`lsregister` (Launch Services validation rejects it on modern macOS).
+
+Fix: install Xcode from the App Store (`mas install 497799835` if signed in,
+or via the App Store app), then:
+
+    sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+    sudo xcodebuild -license accept
+
+After that, a plain `bazel build //...` should just work; no `.bazelrc`
+overrides are needed for Xcode discovery.
+
+Two other issues you may hit, already handled in this repo's config:
+
+1. **`dyld: missing LC_UUID load command` when compiling `wrapped_clang`** --
+   older `apple_support` releases (below 1.19.0) build `wrapped_clang` with a
+   `-no_uuid` workaround that's rejected by newer macOS's stricter dyld. Fixed
+   by explicitly bumping `apple_support` in `MODULE.bazel` (it's normally only
+   a transitive dependency, pinned low by whatever pulls it in):
+
+       bazel_dep(name = "apple_support", version = "2.8.1", repo_name = "build_bazel_apple_support")
+
+2. **Aligned allocation error** -- abseil-cpp uses C++17 aligned allocation
+   which requires macOS 10.13+. `--macos_minimum_os` and
+   `--host_macos_minimum_os` in `.bazelrc` raise the deployment target.
+
+Separately, `bazelisk` on this machine has been observed to ignore this
+repo's `.bazelversion` and launch whatever the latest cached Bazel release
+is. If `bazel --version` doesn't match `.bazelversion`, force it explicitly:
+
+    USE_BAZEL_VERSION=$(cat .bazelversion) bazel build //...
+
+### Runfiles path (bzlmod migration)
+
+The project uses bzlmod (`MODULE.bazel`) instead of the legacy `WORKSPACE` file.
+Under bzlmod, the Bazel runfiles repo name is `_main` rather than the old
+`com_github_livegrep_livegrep`. The `livegrep` frontend binary
+(`cmd/livegrep/livegrep.go`) references this name when locating web templates
+and assets at runtime.
+
 Invoking
 --------
 
@@ -41,9 +91,16 @@ In one terminal, start the `codesearch` server like so:
 
     bazel-bin/src/tools/codesearch -grpc localhost:9999 doc/examples/livegrep/index.json
 
-In another, run livegrep:
+In another, run the frontend via `bazel run` (which sets up the runfiles tree
+containing templates and built web assets):
 
-    bazel-bin/cmd/livegrep/livegrep_/livegrep
+    bazel run //cmd/livegrep -- -connect localhost:9999
+
+Alternatively, add the built binaries to your `PATH` and use `-docroot` to
+point at the built web directory:
+
+    PATH="bazel-bin/src/tools:bazel-bin/cmd/livegrep/livegrep_:$PATH"
+    livegrep -connect localhost:9999 -docroot bazel-bin/web
 
 In a browser, now visit
 [http://localhost:8910/](http://localhost:8910/), and you should see a
@@ -154,7 +211,7 @@ bazel-bin/src/tools/codesearch -load_index xvandish.idx -grpc localhost:9999
 
 Run the frontend in another shell instance with the path to the index file located at `repos/livegrep.json`.
 ```
-bazel-bin/cmd/livegrep/livegrep_/livegrep -index-config ./repos/livegrep.json
+bazel run //cmd/livegrep -- -index-config ./repos/livegrep.json
 ```
 In a browser, now visit `http://localhost:8910` and you should see a working
 livegrep. Search for something, and once you get a result, click on the file
