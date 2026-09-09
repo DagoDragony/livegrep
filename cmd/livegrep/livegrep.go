@@ -31,7 +31,7 @@ func runfilesPath(sourcePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return path.Join(programPath+".runfiles", "com_github_livegrep_livegrep", sourcePath), nil
+	return path.Join(programPath+".runfiles", "_main", sourcePath), nil
 }
 
 func main() {

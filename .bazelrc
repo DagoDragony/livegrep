@@ -3,3 +3,10 @@ build --copt=-DGRPC_BAZEL_BUILD
 
 # abseil requires at least C++17, as of Jul 2025
 build --host_cxxopt=-std=c++17 --cxxopt=-std=c++17
+
+# macOS: set minimum OS version (default 10.11 is too old for aligned allocation)
+build --macos_minimum_os=15.0
+build --host_macos_minimum_os=15.0
+
+# macOS: no cgo usage in this repo's Go code; force pure Go
+build --@rules_go//go/config:pure
